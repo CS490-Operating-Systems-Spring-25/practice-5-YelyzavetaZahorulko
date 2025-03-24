@@ -196,94 +196,96 @@ label incr_command
     cpu_exec
     jump_if label:kernel_start
 
-    var incr_file_desc
+    // Open file
     copy var:parsedArg1 to REG_A
     copy PROGRAM_COUNTER to var:sys_return
     jump label:sys_fs_open
     jump_err label:kernel_start
-    copy REG_RES to var:incr_file_desc
 
-    var temp_filename
-    write "temp_incr" to var:temp_filename
-    copy var:temp_filename to REG_A
-    copy PROGRAM_COUNTER to var:sys_return
-    jump label:sys_fs_create
-    jump_err label:incr_cleanup
-    var temp_file_desc
-    copy REG_RES to var:temp_file_desc
-
-    var line_num
-    write 1 to var:line_num
-    label incr_loop
-        copy var:incr_file_desc to REG_A
-        copy var:line_num to REG_B
+    // Process each line (1-9)
+    write 1 to REG_B  // line counter
+    label process_loop
+        copy REG_RES to REG_A  // file descriptor
+        copy REG_B to REG_B    // line number
         copy PROGRAM_COUNTER to var:sys_return
         jump label:sys_fs_read
-        jump_err label:incr_finish
-        copy REG_RES to REG_C
+        jump_err label:done
 
-        copy REG_C to REG_A
-        write 0 to REG_B
-        write OP_GET_CHAR to REG_OP
+        // Check and replace numbers
+        write "1 file" to REG_C
+        write OP_CMP_EQ to REG_OP
         cpu_exec
-        copy REG_RES to REG_A
-        write "0" to REG_B
-        write OP_CMP to REG_OP
-        cpu_exec
-        copy REG_BOOL_RES to REG_D
-        
-        copy REG_A to REG_A
-        write "9" to REG_B
-        write OP_CMP to REG_OP
-        cpu_exec
-        and REG_D REG_BOOL_RES to REG_D
+        jump_if label:set_two
+        write "2 file" to REG_C
+        jump_if label:set_three
+        write "3 file" to REG_C
+        jump_if label:set_four
+        write "4 file" to REG_C
+        jump_if label:set_five
+        write "5 file" to REG_C
+        jump_if label:set_six
+        write "6 file" to REG_C
+        jump_if label:set_seven
+        write "7 file" to REG_C
+        jump_if label:set_eight
+        write "8 file" to REG_C
+        jump_if label:set_nine
+        write "9 file" to REG_C
+        jump_if label:set_ten
 
-        cmp REG_D 1
-        jne label:write_line
+        jump label:next_line
 
-        copy REG_A to REG_A
+        label set_two
+        write "2 file" to REG_A
+        jump label:write_back
+        label set_three
+        write "3 file" to REG_A
+        jump label:write_back
+        label set_four
+        write "4 file" to REG_A
+        jump label:write_back
+        label set_five
+        write "5 file" to REG_A
+        jump label:write_back
+        label set_six
+        write "6 file" to REG_A
+        jump label:write_back
+        label set_seven
+        write "7 file" to REG_A
+        jump label:write_back
+        label set_eight
+        write "8 file" to REG_A
+        jump label:write_back
+        label set_nine
+        write "9 file" to REG_A
+        jump label:write_back
+        label set_ten
+        write "10 file" to REG_A
+
+        label write_back
+        copy REG_RES to REG_C  // file descriptor
+        copy REG_B to REG_B    // line number
+        copy REG_A to REG_D    // new content
+        copy PROGRAM_COUNTER to var:sys_return
+        jump label:sys_fs_write
+        jump_err label:done
+
+        label next_line
+        copy REG_B to REG_A
         write OP_INCR to REG_OP
         cpu_exec
         copy REG_RES to REG_B
+        jump label:process_loop
 
-        copy REG_C to REG_A
-        write 0 to REG_C
-        copy REG_B to REG_D
-        write OP_SET_CHAR to REG_OP
-        cpu_exec
-        copy REG_RES to REG_C
-
-        label write_line
-        copy var:temp_file_desc to REG_A
-        copy REG_C to REG_B
-        copy PROGRAM_COUNTER to var:sys_return
-        jump label:sys_fs_write
-        jump_err label:incr_cleanup
-
-        add var:line_num 1 to var:line_num
-        jump label:incr_loop
-
-    label incr_finish
-        copy var:incr_file_desc to REG_A
-        copy PROGRAM_COUNTER to var:sys_return
-        jump label:sys_fs_close
-        
-        copy var:temp_file_desc to REG_A
-        copy PROGRAM_COUNTER to var:sys_return
-        jump label:sys_fs_close
-
-        copy var:parsedArg1 to REG_A
-        copy var:temp_filename to REG_B
-        copy PROGRAM_COUNTER to var:sys_return
-        jump label:sys_fs_rename
-        jump_err label:incr_cleanup
-
-        write "File modified successfully" to DISPLAY_BUFFER
-        write COLOR_GREEN to DISPLAY_COLOR
-        write OP_DISPLAY_LN to REG_OP
-        cpu_exec
-        jump label:kernel_start
-
+    label done
+    copy REG_RES to REG_A
+    copy PROGRAM_COUNTER to var:sys_return
+    jump label:sys_fs_close
+    write "Updated" to DISPLAY_BUFFER
+    write COLOR_GREEN to DISPLAY_COLOR
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    jump label:kernel_start
 
 label kernel_end
     copy REG_ERROR to DISPLAY_BUFFER
