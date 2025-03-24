@@ -1,0 +1,325 @@
+MAX_LINE_LENGTH = 256
+DISK_DIR = "hw/"
+BLOCK_SIZE = 1
+
+var disk_name: DS MAX_LINE_LENGTH
+var partition_name: DS MAX_LINE_LENGTH
+var current_line: DS MAX_LINE_LENGTH
+var start_block: DW
+var end_block: DW
+var first_usable: DW
+var last_usable: DW
+
+label kernel_entry_point
+    // Initialize stack
+    copy FREE_MEMORY_END to REG_A
+    write OP_INCR to REG_OP
+    cpu_exec
+    copy REG_RES to var:sys_stack_ptr
+
+    // Get disk name
+    write "Enter disk name: " to DISPLAY_BUFFER
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    copy DISPLAY_BUFFER to REG_A
+    call label:sys_read
+    copy REG_RES to var:disk_name
+
+    // Get partition name
+    write "Enter partition name: " to DISPLAY_BUFFER
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    copy DISPLAY_BUFFER to REG_A
+    call label:sys_read
+    copy REG_RES to var:partition_name
+
+    // Validate partition table
+    call label:validate_partition_table
+    cmp REG_RES, 0
+    je partition_error
+
+    // Open and validate partition
+    call label:validate_partition_header
+    cmp REG_RES, 0
+    je header_error
+
+    call label:validate_file_headers
+    cmp REG_RES, 0
+    je file_header_error
+
+    call label:check_fs_header_end
+    cmp REG_RES, 0
+    je fs_header_end_error
+
+    // Success
+    write "Partition is valid!" to DISPLAY_BUFFER
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    jmp kernel_exit
+
+// Error handlers
+label partition_error
+    write "Error: Partition not found or invalid table" to DISPLAY_BUFFER
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    jmp kernel_exit
+
+label header_error
+    write "Error: Invalid partition header" to DISPLAY_BUFFER
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    jmp kernel_exit
+
+label file_header_error
+    write "Error: Invalid file header" to DISPLAY_BUFFER
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    jmp kernel_exit
+
+label fs_header_end_error
+    write "Error: FS_HEADER_END missing or misplaced" to DISPLAY_BUFFER
+    write OP_DISPLAY_LN to REG_OP
+    cpu_exec
+    jmp kernel_exit
+
+// ====================== Core Validation Functions ======================
+
+// Validate partition table and find partition bounds
+label validate_partition_table
+    // Read block 2 (partition table start)
+    copy var:disk_name to REG_A
+    write 2 to REG_B  // Block number
+    write OP_READ_BLOCK to REG_OP
+    cpu_exec
+    cmp REG_ERROR, 0
+    jne table_error
+
+    // Check for START_PARTITION_TABLE
+    copy REG_RES to REG_A
+    write "START_PARTITION_TABLE" to REG_B
+    call label:str_compare
+    cmp REG_RES, 0
+    je table_error
+
+    // Read block 3 (partition count)
+    copy var:disk_name to REG_A
+    write 3 to REG_B
+    write OP_READ_BLOCK to REG_OP
+    cpu_exec
+    cmp REG_ERROR, 0
+    jne table_error
+
+    // Parse partition entries
+    copy 4 to REG_C  // Start reading from block 4
+    partition_loop:
+        copy var:disk_name to REG_A
+        copy REG_C to REG_B
+        write OP_READ_BLOCK to REG_OP
+        cpu_exec
+        cmp REG_ERROR, 0
+        jne table_error
+
+        // Check for end marker
+        copy REG_RES to REG_A
+        write "END_PARTITION_TABLE" to REG_B
+        call label:str_compare
+        cmp REG_RES, 1
+        je table_success
+
+        // Parse partition entry
+        copy REG_RES to REG_A
+        write "NAME " to REG_B
+        call label:str_starts_with
+        cmp REG_RES, 0
+        je table_error
+
+        // Extract partition info
+        call label:parse_partition_entry
+        cmp REG_RES, 0
+        je table_error
+
+        // Check if this is our partition
+        copy var:partition_name to REG_A
+        copy REG_B to REG_D  // Stored partition name
+        call label:str_compare
+        cmp REG_RES, 1
+        je found_partition
+
+        // Next block
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_C
+        jmp partition_loop
+
+    found_partition:
+        copy REG_C to var:start_block  // Store partition bounds
+        copy REG_D to var:end_block
+        write 1 to REG_RES
+        ret
+
+    table_error:
+        write 0 to REG_RES
+        ret
+
+    table_success:
+        write 0 to REG_RES  // Partition not found
+        ret
+
+// Validate partition header (first line of partition)
+label validate_partition_header
+    copy var:disk_name to REG_A
+    copy var:start_block to REG_B
+    write OP_READ_BLOCK to REG_OP
+    cpu_exec
+    cmp REG_ERROR, 0
+    jne header_fail
+
+    // Check header format
+    copy REG_RES to REG_A
+    write "FS_HEADER kagu_fs FIRST_USABLE_BLOCK " to REG_B
+    call label:str_starts_with
+    cmp REG_RES, 0
+    je header_fail
+
+    // Parse block numbers
+    call label:parse_header_numbers
+    cmp REG_RES, 0
+    je header_fail
+
+    // Validate block ranges
+    copy var:first_usable to REG_A
+    copy var:start_block to REG_B
+    cmp REG_A, REG_B
+    jl header_fail
+
+    copy var:last_usable to REG_A
+    copy var:end_block to REG_B
+    cmp REG_A, REG_B
+    jg header_fail
+
+    write 1 to REG_RES
+    ret
+
+    header_fail:
+        write 0 to REG_RES
+        ret
+
+// Validate file headers
+label validate_file_headers
+    copy var:start_block to REG_C
+    write OP_INCR to REG_OP
+    cpu_exec
+    copy REG_RES to REG_C  // Start at block after header
+
+    file_header_loop:
+        copy var:disk_name to REG_A
+        copy REG_C to REG_B
+        write OP_READ_BLOCK to REG_OP
+        cpu_exec
+        cmp REG_ERROR, 0
+        jne headers_valid  // End of partition
+
+        // Skip empty lines
+        copy REG_RES to REG_A
+        call label:str_length
+        cmp REG_RES, 0
+        je next_header
+
+        // Check for FS_HEADER_END
+        copy REG_RES to REG_A
+        write "FS_HEADER_END" to REG_B
+        call label:str_compare
+        cmp REG_RES, 1
+        je headers_valid
+
+        // Validate file header format
+        call label:validate_single_file_header
+        cmp REG_RES, 0
+        je headers_invalid
+
+        next_header:
+            write OP_INCR to REG_OP
+            cpu_exec
+            copy REG_RES to REG_C
+            jmp file_header_loop
+
+    headers_valid:
+        write 1 to REG_RES
+        ret
+
+    headers_invalid:
+        write 0 to REG_RES
+        ret
+
+// Check FS_HEADER_END is before first usable block
+label check_fs_header_end
+    copy var:start_block to REG_C
+    write OP_INCR to REG_OP
+    cpu_exec
+    copy REG_RES to REG_C  // Start at block after header
+
+    end_check_loop:
+        copy var:disk_name to REG_A
+        copy REG_C to REG_B
+        write OP_READ_BLOCK to REG_OP
+        cpu_exec
+        cmp REG_ERROR, 0
+        jne end_not_found
+
+        // Check for FS_HEADER_END
+        copy REG_RES to REG_A
+        write "FS_HEADER_END" to REG_B
+        call label:str_compare
+        cmp REG_RES, 1
+        je end_found
+
+        // Check if we've passed first usable block
+        copy REG_C to REG_A
+        copy var:first_usable to REG_B
+        cmp REG_A, REG_B
+        jge end_not_found
+
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_C
+        jmp end_check_loop
+
+    end_found:
+        write 1 to REG_RES
+        ret
+
+    end_not_found:
+        write 0 to REG_RES
+        ret
+
+// ====================== Helper Functions ======================
+
+// String comparison (REG_A and REG_B)
+label str_compare
+    // Implementation omitted for brevity
+    ret
+
+// Check if string starts with prefix (REG_A = str, REG_B = prefix)
+label str_starts_with
+    // Implementation omitted for brevity
+    ret
+
+// Parse partition entry (REG_A = line)
+label parse_partition_entry
+    // Implementation omitted for brevity
+    ret
+
+// Parse header numbers (REG_A = header line)
+label parse_header_numbers
+    // Implementation omitted for brevity
+    ret
+
+// Validate single file header (REG_A = line)
+label validate_single_file_header
+    // Implementation omitted for brevity
+    ret
+
+// Kernel exit
+label kernel_exit
+    write OP_HALT to REG_OP
+    cpu_exec

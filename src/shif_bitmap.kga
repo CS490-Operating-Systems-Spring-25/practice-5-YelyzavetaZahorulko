@@ -1,0 +1,113 @@
+// Task 1: Bitmap Shift Functions
+// This file implements left and right shifts for a bitmap using the stack.
+
+// Define constants
+FREE_MEMORY_START = 0x1000
+BITMAP_SIZE = 16
+
+// Initialize bitmap
+label init_bitmap
+    copy FREE_MEMORY_START to REG_A
+    write 'A' to REG_B
+    write BITMAP_SIZE to REG_C
+    init_loop:
+        store REG_A, REG_B
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_A
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_B
+        write OP_DECR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_C
+        jnz REG_C, init_loop
+    ret
+
+// Left shift function
+label left_shift
+    copy FREE_MEMORY_START to REG_A
+    load REG_A, REG_B
+    copy PROGRAM_COUNTER to var:sys_return
+    jump label:sys_stack_push
+    copy BITMAP_SIZE to REG_C
+    write OP_DECR to REG_OP
+    cpu_exec
+    copy REG_RES to REG_C
+    left_shift_loop:
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_A
+        load REG_A, REG_D
+        write OP_DECR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_A
+        store REG_A, REG_D
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_A
+        write OP_DECR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_C
+        jnz REG_C, left_shift_loop
+    write ' ' to REG_B
+    store REG_A, REG_B
+    ret
+
+// Right shift function
+label right_shift
+    copy PROGRAM_COUNTER to var:sys_return
+    jump label:sys_stack_pop
+    copy REG_RES to REG_B
+    copy FREE_MEMORY_START to REG_A
+    copy BITMAP_SIZE to REG_C
+    write OP_DECR to REG_OP
+    cpu_exec
+    copy REG_RES to REG_C
+    right_shift_loop:
+        write OP_DECR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_A
+        load REG_A, REG_D
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_A
+        store REG_A, REG_D
+        write OP_DECR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_C
+        jnz REG_C, right_shift_loop
+    store REG_A, REG_B
+    ret
+
+// Main loop
+label kernel_entry_point
+    copy FREE_MEMORY_END to REG_A
+    write OP_INCR to REG_OP
+    cpu_exec
+    copy REG_RES to var:sys_stack_ptr
+    call label:init_bitmap
+
+    main_loop:
+        call label:sys_keyboard_read
+        copy REG_RES to REG_A
+        cmp REG_A, 'a'
+        je left_shift
+        cmp REG_A, 'd'
+        je right_shift
+        cmp REG_A, 'q'
+        je kernel_exit
+        jmp main_loop
+
+    left_shift:
+        call label:left_shift
+        jmp main_loop
+
+    right_shift:
+        call label:right_shift
+        jmp main_loop
+
+// Exit program
+label kernel_exit
+    write OP_HALT to REG_OP
+    cpu_exec
