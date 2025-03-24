@@ -65,6 +65,9 @@ cpu_exec
     var catStr
     write "cat" to var:catStr
 
+    var incrStr
+    write "incr" to var:incrStr
+
 label kernel_start
     // Display prompt to enter the value:
     copy var:sys_work_dir to DISPLAY_BUFFER
@@ -122,6 +125,13 @@ label kernel_start
     cpu_exec
     jump_if label:cat_command
 
+    // Check incr command e.g. incr path/to/file :
+    copy var:parsedStr to REG_A
+    copy var:incrStr to REG_B
+    write OP_CMP_EQ to REG_OP
+    cpu_exec
+    jump_if label:incr_command
+
     jump label:kernel_start
 
 label cat_command
@@ -177,6 +187,101 @@ label cat_command
         copy var:cat_command_file_desc to REG_A
         copy PROGRAM_COUNTER to var:sys_return
         jump label:sys_fs_close
+        jump label:kernel_start
+
+label incr_command
+    copy var:parsedArg1 to REG_A
+    write "" to REG_B
+    write OP_CMP_EQ to REG_OP
+    cpu_exec
+    jump_if label:kernel_start
+
+    var incr_file_desc
+    copy var:parsedArg1 to REG_A
+    copy PROGRAM_COUNTER to var:sys_return
+    jump label:sys_fs_open
+    jump_err label:kernel_start
+    copy REG_RES to var:incr_file_desc
+
+    var temp_filename
+    write "temp_incr" to var:temp_filename
+    copy var:temp_filename to REG_A
+    copy PROGRAM_COUNTER to var:sys_return
+    jump label:sys_fs_create
+    jump_err label:incr_cleanup
+    var temp_file_desc
+    copy REG_RES to var:temp_file_desc
+
+    var line_num
+    write 1 to var:line_num
+    label incr_loop
+        copy var:incr_file_desc to REG_A
+        copy var:line_num to REG_B
+        copy PROGRAM_COUNTER to var:sys_return
+        jump label:sys_fs_read
+        jump_err label:incr_finish
+        copy REG_RES to REG_C
+
+        copy REG_C to REG_A
+        write 0 to REG_B
+        write OP_GET_CHAR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_A
+        write "0" to REG_B
+        write OP_CMP to REG_OP
+        cpu_exec
+        copy REG_BOOL_RES to REG_D
+        
+        copy REG_A to REG_A
+        write "9" to REG_B
+        write OP_CMP to REG_OP
+        cpu_exec
+        and REG_D REG_BOOL_RES to REG_D
+
+        cmp REG_D 1
+        jne label:write_line
+
+        copy REG_A to REG_A
+        write OP_INCR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_B
+
+        copy REG_C to REG_A
+        write 0 to REG_C
+        copy REG_B to REG_D
+        write OP_SET_CHAR to REG_OP
+        cpu_exec
+        copy REG_RES to REG_C
+
+        label write_line
+        copy var:temp_file_desc to REG_A
+        copy REG_C to REG_B
+        copy PROGRAM_COUNTER to var:sys_return
+        jump label:sys_fs_write
+        jump_err label:incr_cleanup
+
+        add var:line_num 1 to var:line_num
+        jump label:incr_loop
+
+    label incr_finish
+        copy var:incr_file_desc to REG_A
+        copy PROGRAM_COUNTER to var:sys_return
+        jump label:sys_fs_close
+        
+        copy var:temp_file_desc to REG_A
+        copy PROGRAM_COUNTER to var:sys_return
+        jump label:sys_fs_close
+
+        copy var:parsedArg1 to REG_A
+        copy var:temp_filename to REG_B
+        copy PROGRAM_COUNTER to var:sys_return
+        jump label:sys_fs_rename
+        jump_err label:incr_cleanup
+
+        write "File modified successfully" to DISPLAY_BUFFER
+        write COLOR_GREEN to DISPLAY_COLOR
+        write OP_DISPLAY_LN to REG_OP
+        cpu_exec
         jump label:kernel_start
 
 
